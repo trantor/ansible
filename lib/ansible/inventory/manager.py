@@ -37,6 +37,9 @@ from ansible.module_utils._text import to_bytes, to_text
 from ansible.parsing.utils.addresses import parse_address
 from ansible.plugins.loader import inventory_loader
 from ansible.utils.path import unfrackpath
+from ansible.vars.manager import VariableManager
+from ansible.utils.vars import combine_vars
+from ansible.inventory.helpers import get_group_vars
 
 try:
     from __main__ import display
@@ -252,10 +255,13 @@ class InventoryManager(object):
 
             # set so new hosts can use for inventory_file/dir vasr
             self._inventory.current_source = source
+            self._inventory._sources = [source]
 
             # get inventory plugins if needed, there should always be at least one generator
             if not self._inventory_plugins:
                 self._setup_inventory_plugins()
+
+            vm = VariableManager(loader=self._loader, inventory=self._inventory)
 
             # try source with each plugin
             failures = []
@@ -275,6 +281,13 @@ class InventoryManager(object):
                         plugin.parse(self._inventory, self._loader, source, cache=cache)
                         parsed = True
                         display.vvv('Parsed %s inventory source with %s plugin' % (source, plugin_name))
+                        hosts = self._inventory.hosts
+                        for host in hosts:
+                            inv_dir_vars = vm.get_vars(host=self._inventory.get_host(host))
+                            combined = combine_vars(get_group_vars(self._inventory.get_host(host).get_groups()),inv_dir_vars)
+                            for k in combined.keys():
+                                self._inventory.get_host(host).set_variable(k, combined[k])
+
                         break
                     except AnsibleParserError as e:
                         display.debug('%s was not parsable by %s' % (source, plugin_name))
@@ -300,6 +313,7 @@ class InventoryManager(object):
 
         # clear up, jic
         self._inventory.current_source = None
+        self._inventory._sources = None
 
         return parsed
 
